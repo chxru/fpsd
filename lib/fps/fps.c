@@ -1,10 +1,17 @@
 #include <stdlib.h>
 #include <avr/io.h>
+#include <avr/delay.h>
+
 #include "fps.h"
 #include "usart.h"
+#include "lcd.h"
 
 // data sheet
-// https://www.rajguruelectronics.com/Product/1276/R307%20Fingerprint%20Module.pdf
+// https://www.electronicscomp.com/datasheet/r307-fingerprint-module-user-manual.pdf
+
+// common parameters
+const char FPS_Tx_Header[2] = {FPS_ID_STARTCODE & 0xFFU, (FPS_ID_STARTCODE >> 8) & 0xFFU};
+const char FPS_Tx_Address[4] = {FPS_DEFAULT_ADDRESS & 0xFFU, (FPS_DEFAULT_ADDRESS >> 8) & 0xFFU, (FPS_DEFAULT_ADDRESS >> 16) & 0xFFU, (FPS_DEFAULT_ADDRESS >> 24) & 0xFFU};
 
 // Send command to Finger Print Sensor
 struct FPSResponse FPSSendCommand(uint8_t command, uint8_t *data, uint16_t dataLength)
@@ -23,6 +30,17 @@ struct FPSResponse FPSSendCommand(uint8_t command, uint8_t *data, uint16_t dataL
     Checksum: 2 bytes, high byte first
   */
 
+  // special case for FPS_CMD_VERIFYPASSWORD
+  if (command == FPS_CMD_VERIFYPASSWORD)
+  {
+    data[0] = FPS_DEFAULT_PASSWORD & 0xFFU;
+    data[1] = (FPS_DEFAULT_PASSWORD >> 8) & 0xFFU;
+    data[2] = (FPS_DEFAULT_PASSWORD >> 16) & 0xFFU;
+    data[3] = (FPS_DEFAULT_PASSWORD >> 24) & 0xFFU;
+
+    dataLength = 4;
+  }
+
   // send header
   UsartSendChar(FPS_Tx_Header[1]);
   UsartSendChar(FPS_Tx_Header[0]);
@@ -37,16 +55,17 @@ struct FPSResponse FPSSendCommand(uint8_t command, uint8_t *data, uint16_t dataL
   UsartSendChar(FPS_ID_COMMANDPACKET);
 
   // send packet length
-  UsartSendChar(dataLength >> 8);
+  dataLength += 3; // add command and checksum length
+  UsartSendChar((dataLength >> 8) & 0xFFU);
   UsartSendChar(dataLength & 0xFF);
 
   // send packet command
   UsartSendChar(command);
 
   // send packet content
-  if (data != NULL)
+  if (data != NULL || dataLength != 0)
   {
-    for (uint16_t i = 0; i < dataLength; i++)
+    for (uint16_t i = dataLength - 3; i > 0; i--)
     {
       UsartSendChar(data[i]);
     }
@@ -61,11 +80,11 @@ struct FPSResponse FPSSendCommand(uint8_t command, uint8_t *data, uint16_t dataL
   UsartSendChar(checksum >> 8);
   UsartSendChar(checksum & 0xFF);
 
+  LCD_Message("FPS", "Request Sent");
+
+  _delay_ms(1000);
+
   // prepare for receiving response
-  uint8_t *dataBuffer = (uint8_t *)malloc(FPS_DEFAULT_RX_DATA_LENGTH);
-  uint8_t highBuffer[FPS_DEFAULT_SERIAL_BUFFER_LENGTH] = {0};
-  uint16_t highBufferLength = 0;
-  uint8_t byteBuffer = 0;
   uint8_t temp = 0;
 
   // create response with default values
@@ -76,6 +95,8 @@ struct FPSResponse FPSSendCommand(uint8_t command, uint8_t *data, uint16_t dataL
   temp = UsartReceiveChar();
   if (temp != FPS_Tx_Header[1])
   {
+    LCD_Message("Error", "FPS_Tx_Header[1]");
+
     return response;
   }
 
@@ -83,6 +104,7 @@ struct FPSResponse FPSSendCommand(uint8_t command, uint8_t *data, uint16_t dataL
   temp = UsartReceiveChar();
   if (temp != FPS_Tx_Header[0])
   {
+    LCD_Message("Error", "FPS_Tx_Header[0]");
     return response;
   }
 
@@ -90,6 +112,7 @@ struct FPSResponse FPSSendCommand(uint8_t command, uint8_t *data, uint16_t dataL
   temp = UsartReceiveChar();
   if (temp != FPS_Tx_Address[3])
   {
+    LCD_Message("Error", "FPS_Tx_Address[3]");
     return response;
   }
 
@@ -97,6 +120,7 @@ struct FPSResponse FPSSendCommand(uint8_t command, uint8_t *data, uint16_t dataL
   temp = UsartReceiveChar();
   if (temp != FPS_Tx_Address[2])
   {
+    LCD_Message("Error", "FPS_Tx_Address[2]");
     return response;
   }
 
@@ -104,6 +128,7 @@ struct FPSResponse FPSSendCommand(uint8_t command, uint8_t *data, uint16_t dataL
   temp = UsartReceiveChar();
   if (temp != FPS_Tx_Address[1])
   {
+    LCD_Message("Error", "FPS_Tx_Address[1]");
     return response;
   }
 
@@ -111,8 +136,11 @@ struct FPSResponse FPSSendCommand(uint8_t command, uint8_t *data, uint16_t dataL
   temp = UsartReceiveChar();
   if (temp != FPS_Tx_Address[0])
   {
+    LCD_Message("Error", "FPS_Tx_Address[0]");
     return response;
   }
+
+  LCD_Message("FPS", "Parsing Response");
 
   response = FPSReceivePacket(command);
 
@@ -122,7 +150,6 @@ struct FPSResponse FPSSendCommand(uint8_t command, uint8_t *data, uint16_t dataL
 struct FPSResponse FPSReceivePacket(uint8_t command)
 {
   struct FPSResponse response;
-  uint8_t temp;
 
   // receive package identifier
   response.ResponseCode = UsartReceiveChar();
@@ -155,11 +182,13 @@ struct FPSResponse FPSReceivePacket(uint8_t command)
     response.Data |= UsartReceiveChar();
 
     // ignore match score
-    temp = UsartReceiveChar();
-    temp = UsartReceiveChar();
+    UsartReceiveChar();
+    UsartReceiveChar();
   }
 
   // ignore checksum
-  temp = UsartReceiveChar();
-  temp = UsartReceiveChar();
+  UsartReceiveChar();
+  UsartReceiveChar();
+
+  return response;
 }

@@ -94,8 +94,6 @@
 // #define FPS_PASSWORD 0xFFFFFFFF // default password and address is 0xFFFFFFFF
 // #define FPS_ADDRESS 0xFFFFFFFF
 
-uint8_t FPS_Tx_Header[2] = {FPS_ID_STARTCODE & 0xFFU, (FPS_ID_STARTCODE >> 8) & 0xFFU};
-uint16_t FPS_Tx_Address[4] = {0x0000, 0x0000, 0x0000, 0x0000}; // default address is 0x00000000
 uint8_t *FPS_Tx_DataBuffer;
 uint32_t FPS_Tx_DataLength;
 
@@ -105,5 +103,8 @@ struct FPSResponse
   uint8_t Data;
   uint32_t DataLength;
 };
+
+struct FPSResponse FPSSendCommand(uint8_t command, uint8_t *data, uint16_t dataLength);
+struct FPSResponse FPSReceivePacket(uint8_t command);
 
 #endif
